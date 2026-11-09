@@ -1,0 +1,67 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, mkdirSync, cpSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { openDb, seedCatalog } from "../src/lib/db.ts";
+import { insertVideo, approveVideo } from "../src/lib/admin.ts";
+import { loadState, saveState } from "../src/lib/state.ts";
+
+const ROOT = join(import.meta.dirname, "..");
+function project() { // a throw-away copy of what the GitHub Action sees
+  const d = mkdtempSync(join(tmpdir(), "mmap-gh-")); for (const x of ["src", "public", "package.json"]) cpSync(join(ROOT, x), join(d, x), { recursive: true });
+  mkdirSync(join(d, "state")); mkdirSync(join(d, "ops")); writeFileSync(join(d, "ops/.gitkeep"), "");
+  const db = openDb(":memory:"); seedCatalog(db);
+  const a = insertVideo(db, { youtubeVideoId: "AAAAAAAAAAA", title: "How to Release Your Piriformis", source: "youtube-sync", requireRelease: true });
+  const b = insertVideo(db, { youtubeVideoId: "BBBBBBBBBBB", title: "My Chronic Pain Journey", source: "youtube-sync", requireRelease: true });
+  saveState(db, join(d, "state/db.json")); return { d, a, b };
+}
+const run = (d: string, script: string, env: Record<string, string> = {}) => execFileSync(process.execPath, [script], { cwd: d, env: { ...process.env, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+test("state file round trip is exact and stable (byte-identical when re-saved)", () => {
+  const d = mkdtempSync(join(tmpdir(), "mmap-st-")), f = join(d, "db.json"), db = openDb(":memory:"); seedCatalog(db);
+  const id = insertVideo(db, { youtubeVideoId: "CCCCCCCCCCC", title: "Quad release", source: "manual-url", notes: "line1\n\"quoted\" ünïcode" }); approveVideo(db, id, ["quadriceps", "hip-flexors"]);
+  saveState(db, f); const db2 = loadState(f); saveState(db2, join(d, "db2.json")); saveState(loadState(join(d, "db2.json")), join(d, "db3.json")); // the first load only adds the catalog fingerprint
+  assert.equal(readFileSync(join(d, "db3.json"), "utf8"), readFileSync(join(d, "db2.json"), "utf8"));
+  for (const t of ["videos", "mappings", "muscles"]) assert.deepEqual(db2.prepare(`SELECT * FROM ${t} ORDER BY id`).all(), db.prepare(`SELECT * FROM ${t} ORDER BY id`).all());
+});
+
+test("gh-run applies queued admin ops through the normal server, logs every result, removes processed ops", () => {
+  const { d, b } = project();
+  writeFileSync(join(d, "ops/1.json"), JSON.stringify({ id: "op1", path: "/api/admin/approve", body: { videoId: b, slugs: ["piriformis"] } }));
+  writeFileSync(join(d, "ops/2.json"), JSON.stringify({ id: "op2", path: "/api/admin/approve", body: { videoId: 999, slugs: ["piriformis"] } }));
+  writeFileSync(join(d, "ops/3.json"), JSON.stringify({ id: "op3", path: "/../etc/passwd", body: {} }));
+  writeFileSync(join(d, "ops/4.json"), "{not json");
+  writeFileSync(join(d, "ops/5.json"), JSON.stringify({ id: "op5", path: "/api/admin/import-csv", body: "platform,url,title\nyoutube,https://youtu.be/DDDDDDDDDDD,Calf release\n" }));
+  run(d, "src/cli/gh-run.ts");
+  assert.deepEqual(readdirSync(join(d, "ops")), [".gitkeep"]);
+  const rep = JSON.parse(readFileSync(join(d, "state/reports.json"), "utf8")); const by = (id: string) => rep.find((r: any) => r.id === id);
+  assert.equal(by("op1").ok, true); assert.equal(by("op2").ok, false); assert.equal(by("op3").ok, false); assert.equal(rep.find((r: any) => r.id === "4").ok, false); assert.equal(by("op5").result.added, 1);
+  const db = loadState(join(d, "state/db.json"));
+  assert.equal((db.prepare("SELECT processing_status s FROM videos WHERE id=?").get(b) as any).s, "approved");
+  assert.equal((db.prepare("SELECT COUNT(*) n FROM videos").get() as any).n, 3);
+});
+
+test("built site: no secret anywhere, admin token decrypts only with the password, every public endpoint is a file", async () => {
+  const { d } = project(); const PW = "correct horse battery", TOKEN = "github_pat_SECRET_TOKEN_123", YT = "AIzaSECRET-YT-KEY";
+  run(d, "src/cli/build-site.ts", { ADMIN_PASSWORD: PW, ADMIN_TOKEN: TOKEN, YOUTUBE_API_KEY: YT, GITHUB_REPOSITORY: "mg2/body-map", HAS_YOUTUBE_KEY: "1" });
+  const site = join(d, "site"); const all: string[] = [];
+  const walk = (p: string) => { for (const e of readdirSync(p, { withFileTypes: true })) e.isDirectory() ? walk(join(p, e.name)) : all.push(join(p, e.name)); }; walk(site);
+  for (const f of all) { const s = readFileSync(f, "latin1"); for (const secret of [PW, TOKEN, YT]) assert.ok(!s.includes(secret), `${secret} leaked into ${f}`); }
+  for (const f of ["index.html", "app.js", "static-api.js", "theme.js", ".nojekyll", "api/meta.json", "api/muscles.all.json", "api/map.posterior.yoga.svg", "api/videos/piriformis.release.json", "api/admin/review.json", "api/admin/backup.db"]) assert.ok(existsSync(join(site, f)), f);
+  assert.equal(JSON.parse(readFileSync(join(site, "api/meta.json"), "utf8")).repo, "mg2/body-map");
+  assert.equal(JSON.parse(readFileSync(join(site, "api/admin/diagnostics.json"), "utf8")).youtubeApiKeyConfigured, true);
+  assert.deepEqual(JSON.parse(readFileSync(join(site, "api/videos/piriformis.release.json"), "utf8")).map((v: any) => v.youtubeVideoId), ["AAAAAAAAAAA"]);
+  const k = JSON.parse(readFileSync(join(site, "admin-key.json"), "utf8")); const b = (s: string) => Buffer.from(s, "base64");
+  const dec = async (pw: string) => { const k0 = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b(k.salt), iterations: k.iter, hash: "SHA-256" }, k0, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b(k.iv) }, key, b(k.ct))); };
+  assert.equal(await dec(PW), TOKEN); await assert.rejects(dec("wrong"));
+  const html = readFileSync(join(site, "index.html"), "utf8"); assert.match(html, /src="static-api\.js"/); assert.match(html, /Content-Security-Policy/); assert.ok(!html.includes('src="/'));
+});
+
+test("without the secrets the site still builds, and the login explains what is missing", () => {
+  const { d } = project(); run(d, "src/cli/build-site.ts", { ADMIN_PASSWORD: "", ADMIN_TOKEN: "" });
+  assert.deepEqual(JSON.parse(readFileSync(join(d, "site/admin-key.json"), "utf8")).missing, ["ADMIN_PASSWORD", "ADMIN_TOKEN"]);
+});

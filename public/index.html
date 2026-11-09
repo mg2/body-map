@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Elite Massage Muscle Map</title>
+<script src="/theme.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#17202a;--mut:#5b6673;--acc:#1f6f9f;--on-acc:#fff;--sel:#d97706;--fill:#7fb8dd;--bd:#d5dae0;--warn:#b45309;--ok:#15803d;color-scheme:light dark}
+html[data-accent=green]{--acc:#2f7d57;--fill:#86c9a5}html[data-accent=red]{--acc:#b24a55;--sel:#2f6fdd;--fill:#e79aa1}html[data-accent=yellow]{--acc:#8f6b00;--sel:#2f6fdd;--fill:#ecd27a}
+@media(prefers-color-scheme:dark){:root{--bg:#12151a;--card:#1b2027;--fg:#e8ecf1;--mut:#9aa6b4;--acc:#5ab0e0;--on-acc:#0f1720;--sel:#f59e0b;--fill:#5ab0e0;--bd:#2f3844;--warn:#f59e0b;--ok:#4ade80}
+html[data-accent=green]{--acc:#6cc79a;--fill:#6cc79a}html[data-accent=red]{--acc:#e88a92;--sel:#6db3ff;--fill:#e88a92}html[data-accent=yellow]{--acc:#e6c35c;--on-acc:#1a1500;--sel:#6db3ff;--fill:#e6c35c}}
+a{color:var(--acc)}*{box-sizing:border-box}[hidden]{display:none!important} /* author rules like main{display:grid} would otherwise override the hidden attribute (both tabs were showing at once) */body{margin:0;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;padding:.6rem 1rem;background:var(--card);border-bottom:1px solid var(--bd)}
+header h1{font-size:1.05rem;margin:0;flex:1 1 auto}nav{display:flex;gap:.4rem}
+.seg{display:inline-flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}.seg button{border:0;border-radius:0;padding:.35rem .75rem}.seg button+button{border-left:1px solid var(--bd)}.seg [aria-checked=true]{background:var(--acc);color:var(--on-acc)}
+#accentPicker{display:flex;gap:.35rem;align-items:center}#accentPicker button,#accentPicker label{width:1.45rem;height:1.45rem;padding:0;border-radius:50%;border:2px solid var(--bd);position:relative;cursor:pointer;display:block}
+#accentPicker [aria-checked=true]{outline:2px solid var(--fg);outline-offset:2px}#accentPicker input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.sw-blue{background:#6fb3e0}.sw-green{background:#7cc9a0}.sw-red{background:#e8929a}.sw-yellow{background:#e8c765}.sw-custom{background:conic-gradient(#e8929a,#e8c765,#7cc9a0,#6fb3e0,#c3a3e8,#e8929a)}
+button,select,input,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:.35rem .65rem}
+button{cursor:pointer}button:hover{border-color:var(--acc)}button[aria-pressed=true],button.on{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
+:focus-visible{outline:3px solid var(--sel);outline-offset:2px}
+.badge{background:var(--warn);color:#000;border-radius:99px;padding:0 .45rem;font-size:.8rem;margin-left:.3rem}
+main{display:grid;grid-template-columns:minmax(260px,420px) 1fr;gap:1rem;padding:1rem;max-width:1200px;margin:auto}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:.8rem}
+#mapwrap{overflow:hidden;touch-action:pan-y;border-radius:8px}#map svg{display:block;width:100%;height:72vh;color:var(--acc)}
+.silhouette path{fill:var(--fill);fill-opacity:.2;stroke:none}
+#map .muscle{cursor:pointer;outline:none}.muscle path,.muscle ellipse{fill:url(#hatch-anterior);stroke:currentColor;stroke-width:1;vector-effect:non-scaling-stroke}
+#map svg[aria-label^=Back] .muscle path,#map svg[aria-label^=Back] .muscle ellipse{fill:url(#hatch-posterior)}
+.muscle.approved path,.muscle.approved ellipse{fill:var(--fill)!important;fill-opacity:.8;stroke-width:1.6}.muscle.pending path,.muscle.pending ellipse{stroke-dasharray:4 3;stroke-width:1.6}
+.muscle:hover path,.muscle:hover ellipse{fill-opacity:.85;stroke-width:2}.muscle:focus-visible path,.muscle:focus-visible ellipse,.muscle.selected path,.muscle.selected ellipse{stroke:var(--sel);stroke-width:2.6}
+#map.only .muscle:not(.approved){display:none}
+/* Full body: a frame around the whole map plus a labelled tab; both are clickable (the frame only on its stroke, so the muscles inside stay clickable) */
+.fullbody .fbframe{fill:none;stroke:currentColor;stroke-opacity:.65;stroke-width:2;stroke-dasharray:6 4;vector-effect:non-scaling-stroke;pointer-events:stroke}
+.fullbody .fbtab rect{fill:var(--card);stroke:currentColor;stroke-width:1.5;vector-effect:non-scaling-stroke;pointer-events:all}.fullbody .fbtab text{fill:var(--fg);font:600 12px system-ui,sans-serif;pointer-events:none}
+.fullbody.approved .fbframe{stroke-opacity:1;stroke-width:7;stroke-dasharray:none}.fullbody.approved .fbtab rect{fill:var(--fill);fill-opacity:.95}
+.fullbody:hover .fbframe{stroke-width:9;stroke-opacity:1}.fullbody:hover .fbtab rect{stroke-width:3}
+.fullbody.selected .fbframe,.fullbody:focus-visible .fbframe{stroke:var(--sel);stroke-opacity:1;stroke-width:7;stroke-dasharray:none}.fullbody.selected .fbtab rect,.fullbody:focus-visible .fbtab rect{stroke:var(--sel);stroke-width:3}
+.legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.82rem;color:var(--mut);margin:.4rem 0}.legend i{display:inline-block;width:1.2rem;height:.8rem;border:2px solid var(--acc);vertical-align:middle;margin-right:.25rem}
+.l-a{background:var(--fill);opacity:.9}.l-p{border-style:dashed!important}.l-n{background:repeating-linear-gradient(45deg,transparent 0 3px,var(--acc) 3px 4px);border-width:1px!important}
+.row{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}.mut{color:var(--mut)}.small{font-size:.85rem}
+.vid{display:grid;grid-template-columns:220px 1fr;gap:.7rem;margin:.7rem 0;padding-top:.7rem;border-top:1px solid var(--bd)}@media(max-width:640px){.vid{grid-template-columns:1fr}}
+.vid img,.vid iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:6px;background:#0003;object-fit:cover}
+.thumb{position:relative;display:block;width:100%;padding:0;border:0;background:#000;cursor:pointer;border-radius:6px;overflow:hidden}.thumb img{display:block;border-radius:0}
+.noimg{aspect-ratio:16/9;display:grid;place-items:center;color:#fff9;font-size:.8rem}.playicon{position:absolute;inset:0;display:grid;place-items:center;font-size:2.2rem;color:#fff;text-shadow:0 1px 8px #000;background:rgba(0,0,0,.2);transition:background .15s}
+.thumb:hover .playicon,.thumb:focus-visible .playicon{background:rgba(0,0,0,.42)}
+dialog#player{width:min(960px,96vw);max-height:96vh;padding:0;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);overflow:hidden}#player::backdrop{background:rgba(0,0,0,.78)}
+#player .bar{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.55rem .8rem}#player .bar strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#player .frame{aspect-ratio:16/9;background:#000}#player iframe{display:block;width:100%;height:100%;border:0;aspect-ratio:auto;border-radius:0}
+#mapwrap.zoomed{touch-action:none;cursor:grab}#mapwrap.panning{cursor:grabbing;user-select:none}
+.vid.primary{border-left:4px solid var(--ok);padding-left:.6rem}
+.tag{font-size:.75rem;border:1px solid var(--bd);border-radius:4px;padding:0 .35rem;margin-right:.3rem}.warn{color:var(--warn)}.ok{color:var(--ok)}
+ul.list{list-style:none;padding:0;margin:.4rem 0}ul.list li button{width:100%;text-align:left;margin:.15rem 0}
+.disc{font-size:.8rem;color:var(--mut);margin-top:1rem;border-top:1px solid var(--bd);padding-top:.6rem}
+main.admin{grid-template-columns:minmax(0,1fr);gap:1rem}main>*{min-width:0}.vid>*{min-width:0}.err{color:#dc2626}.chip{display:inline-flex;gap:.25rem;align-items:center;margin:.15rem .5rem .15rem 0}
+pre{overflow:auto;background:#0002;padding:.5rem;border-radius:6px;font-size:.8rem;white-space:pre-wrap}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style></head><body>
+<header><h1>Elite Massage Muscle Map</h1><div id="collSwitch" class="seg" role="radiogroup" aria-label="Show videos from">
+  <button type="button" role="radio" aria-checked="true" data-coll="all">All</button><button type="button" role="radio" aria-checked="false" data-coll="release">Muscle release</button><button type="button" role="radio" aria-checked="false" data-coll="yoga">Yoga</button></div>
+ <div id="accentPicker" role="radiogroup" aria-label="Accent colour">
+  <button type="button" role="radio" aria-checked="true" data-accent="blue" class="sw-blue" aria-label="Soft blue accent" title="Soft blue"></button>
+  <button type="button" role="radio" aria-checked="false" data-accent="green" class="sw-green" aria-label="Soft green accent" title="Soft green"></button>
+  <button type="button" role="radio" aria-checked="false" data-accent="red" class="sw-red" aria-label="Soft red accent" title="Soft red"></button>
+  <button type="button" role="radio" aria-checked="false" data-accent="yellow" class="sw-yellow" aria-label="Soft yellow accent" title="Soft yellow"></button>
+  <label class="sw-custom" title="Custom colour"><input type="color" id="accentCustom" value="#6fb3e0" aria-label="Custom accent colour"></label></div>
+ <nav aria-label="Sections"><button id="tab-library" aria-pressed="true">Library</button><button id="tab-admin" aria-pressed="false">Admin<span id="pendingBadge" class="badge" hidden></span></button></nav></header>
+<div id="toast" role="status" aria-live="polite" style="position:fixed;bottom:1rem;left:1rem;right:1rem;text-align:center;pointer-events:none"></div>
+<main id="library">
+ <section class="card" aria-label="Body map">
+  <div class="row"><button id="v-anterior" aria-pressed="true">Front</button><button id="v-posterior" aria-pressed="false">Back</button>
+   <span style="flex:1"></span><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zreset">Reset</button></div>
+  <label class="small mut" for="q">Search muscles (common name, anatomical name or alias)</label>
+  <input id="q" type="search" autocomplete="off" style="width:100%" placeholder="e.g. traps, lat, calf, glute"><ul id="results" class="list" aria-label="Search results"></ul>
+  <div class="legend" aria-label="Legend"><span><i class="l-a"></i>Has approved videos</span><span><i class="l-p"></i>Pending suggestions</span><span><i class="l-n"></i>No videos yet</span></div>
+  <label class="small"><input type="checkbox" id="onlyVideos" checked> Show only muscles that have videos</label>
+  <div id="mapwrap"><div id="map" aria-live="off"></div></div>
+  <details style="margin-top:.6rem"><summary>Browse as a list (accessible alternative)</summary><div id="allList"></div></details>
+ </section>
+ <section class="card" aria-label="Details"><nav id="crumbs" class="small" aria-label="Breadcrumb"></nav><div id="detail"></div>
+  <p class="disc">Map artwork: <a href="https://github.com/vulovix/body-muscles" target="_blank" rel="noopener noreferrer">body-muscles</a> © Ivan Vulović, Apache-2.0 (path data converted to JSON); deep and small muscles are this app’s own schematic shapes.</p><p class="disc">This library is for general educational reference and does not provide diagnosis or personalized medical advice. Stop if an activity causes pain, numbness, weakness, dizziness, or worsening symptoms, and consult an appropriate healthcare professional.</p></section>
+</main>
+<main id="adminPane" class="admin" hidden></main>
+<dialog id="player" aria-label="Video player"></dialog>
+<script src="/app.js"></script></body></html>

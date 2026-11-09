@@ -1,0 +1,21 @@
+node_modules/
+.next/
+.env
+.env.local
+.env.*.local
+*.db
+*.db-journal
+backups/
+data/
+site/
+dl/
+empty/
+# local Windows Node.js shims (not part of the app)
+npm
+npm.cmd
+npm.ps1
+npx
+npx.cmd
+npx.ps1
+nodevars.bat
+install_tools.bat

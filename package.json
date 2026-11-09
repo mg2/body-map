@@ -1,0 +1,21 @@
+{
+  "name": "elite-massage-muscle-map",
+  "version": "0.17.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync:youtube": "node --env-file-if-exists=.env.local src/cli/sync.ts",
+    "start": "node --env-file-if-exists=.env.local src/cli/serve.ts",
+    "dev": "node --env-file-if-exists=.env.local --watch src/cli/serve.ts",
+    "test": "node --test \"tests/*.test.ts\"",
+    "e2e": "python3 tests/e2e.py",
+    "titles": "node --env-file-if-exists=.env.local channel-titles.mjs",
+    "match-report": "node src/cli/match-report.ts",
+    "build:site": "node src/cli/build-site.ts",
+    "gh:run": "node --env-file-if-exists=.env.local src/cli/gh-run.ts",
+    "state:from-db": "node src/cli/state-from-db.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
