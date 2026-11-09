@@ -35,7 +35,7 @@ export function muscleStates(db: Db, coll: CollFilter = "all"): Record<string, "
 }
 const safeThumb = (u?: string | null) => { try { const x = new URL(u ?? ""); return x.protocol === "https:" && /(^|\.)ytimg\.com$/.test(x.hostname) ? x.href : null; } catch { return null; } };
 export const publicVideo = (r: any) => ({ id: r.id, youtubeVideoId: r.youtube_video_id, canonicalUrl: r.canonical_url, title: r.title, description: String(r.description ?? "").slice(0, 600), publishedAt: r.published_at,
-  thumbnailUrl: safeThumb(r.thumbnail_url), discoveredAt: r.discovered_at, isShort: !!r.is_short_candidate, unavailable: r.availability_status !== "available", status: r.processing_status, collection: r.collection ?? "release", channelTitle: r.channel_title ?? null, ignoredReason: r.ignored_reason, notes: r.notes, source: r.import_source, isPrimary: !!r.is_primary });
+  thumbnailUrl: safeThumb(r.thumbnail_url), discoveredAt: r.discovered_at, isShort: !!r.is_short_candidate, durationSeconds: r.duration_seconds ?? null, unavailable: r.availability_status !== "available", status: r.processing_status, collection: r.collection ?? "release", channelTitle: r.channel_title ?? null, ignoredReason: r.ignored_reason, notes: r.notes, source: r.import_source, isPrimary: !!r.is_primary });
 
 export function listMuscles(db: Db, coll: CollFilter = "all") {
   const { cf, cp } = collFilter(coll); const st = muscleStates(db, coll);

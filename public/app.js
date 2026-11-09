@@ -14,6 +14,21 @@ async function api(path, o = {}) {
 const toast = (m, bad) => { const t = $("#toast"); t.textContent = ""; t.append(h("span", { class: "card " + (bad ? "err" : ""), style: "display:inline-block;pointer-events:auto" }, m)); clearTimeout(toast.t); toast.t = setTimeout(() => (t.textContent = ""), 6000); };
 const STATIC = !!window.StaticApi, isAdmin = () => !STATIC || StaticApi.isAdmin(), H = p => (STATIC ? StaticApi.href(p) : p);
 const QUEUED = "Saved to GitHub. Live in about 1–2 minutes; the result appears in the box at the bottom right.";
+/** Re-render `box` without losing your place: the page keeps its height while redrawing (so the browser never clamps the scroll
+ *  to the top), then the card you were looking at goes back to the same spot on screen. If that card is gone (ignored, removed),
+ *  the next one takes its place. Open notes and unsaved note text survive the redraw. */
+async function keepPlace(box, render) {
+  const cards = [...box.querySelectorAll("[data-key]")], top = box.getBoundingClientRect().top;
+  const i = cards.findIndex(c => c.getBoundingClientRect().bottom > 8), anchors = i < 0 ? [] : cards.slice(i).map(c => ({ key: c.dataset.key, y: c.getBoundingClientRect().top }));
+  const kept = new Map(cards.map(c => { const d = c.querySelector("details"), t = c.querySelector("textarea"); return [c.dataset.key, { open: !!d?.open, text: t && t.value !== t.defaultValue ? t.value : null }]; }));
+  const y0 = window.scrollY; box.style.minHeight = box.offsetHeight + "px";
+  try { await render(); } finally {
+    for (const c of box.querySelectorAll("[data-key]")) { const k = kept.get(c.dataset.key); if (!k) continue; const d = c.querySelector("details"), t = c.querySelector("textarea"); if (d && k.open) d.open = true; if (t && k.text !== null) t.value = k.text; }
+    box.style.minHeight = "";
+    const esc = s => (window.CSS?.escape ? CSS.escape(s) : s), a = anchors.find(a => box.querySelector(`[data-key="${esc(a.key)}"]`));
+    if (a) window.scrollBy(0, box.querySelector(`[data-key="${esc(a.key)}"]`).getBoundingClientRect().top - (anchors[0].y));
+    else if (anchors.length || box.getBoundingClientRect().top !== top) window.scrollTo(0, Math.min(y0, document.documentElement.scrollHeight));
+  } }
 const guard = fn => async (...a) => { try { await fn(...a); } catch (e) { if (e.queued) toast(QUEUED); else toast(e.message, true); } }; // e.queued: GitHub Pages saved the change; it goes live with the next deploy
 const apiQ = (p, o) => api(p, o).catch(e => { if (e.queued) return { queued: true }; throw e; }); // for handlers that queue several changes in a loop
 const REGIONS = { "full-body": "Full body", "head-neck": "Head and neck", shoulders: "Shoulders", chest: "Chest", "upper-back": "Upper back", "lower-back": "Lower back", "upper-arms": "Upper arms", forearms: "Forearms", hands: "Hands", abdomen: "Abdomen", "hips-glutes": "Hips and gluteal region", "front-thighs": "Front thighs", "back-thighs": "Back thighs", "inner-thighs": "Inner thighs", "outer-thighs": "Outer thighs", knees: "Knees", calves: "Calves", shins: "Shins", ankles: "Ankles", feet: "Feet" };
@@ -24,6 +39,32 @@ const creatorOf = v => v.channelTitle || CREATOR_FALLBACK[v.collection] || ""; /
 let SAVED_COLL = "all"; try { const c = localStorage.getItem("mmap:collection"); if (["all", "release", "yoga"].includes(c)) SAVED_COLL = c; } catch { /* keep default */ }
 const S = { collection: SAVED_COLL, view: "anterior", slug: null, region: null, muscles: [], zoom: 1, cx: 15.75, cy: 46.5, lastView: "anterior" };
 const by = slug => S.muscles.find(m => m.slug === slug);
+const fmtLen = sec => { const s = Math.max(0, Math.round(sec)), hh = Math.floor(s / 3600), mm = Math.floor(s / 60) % 60, ss = String(s % 60).padStart(2, "0"); return hh ? `${hh}:${String(mm).padStart(2, "0")}:${ss} h` : `${mm}:${ss} min`; };
+/** Yoga length filter: "Min [ ] Max [ ] minutes". Empty = no limit, both ends included, remembered on this device for every muscle.
+ *  Videos whose length is unknown are always shown (so nothing disappears silently). */
+const LEN_KEY = "mmap:yogaLen";
+const lenGet = () => { try { const o = JSON.parse(localStorage.getItem(LEN_KEY) || "{}"); return { min: typeof o.min === "string" ? o.min : "", max: typeof o.max === "string" ? o.max : "" }; } catch { return { min: "", max: "" }; } };
+const lenSet = o => { try { localStorage.setItem(LEN_KEY, JSON.stringify(o)); } catch { /* storage blocked: filter still works for this page */ } };
+const lenNum = raw => { const t = String(raw).trim().replace(",", "."); if (!t) return { v: null }; const n = Number(t); return Number.isFinite(n) && n >= 0 && n <= 10000 ? { v: n } : { bad: true }; };
+function yogaList(vids) {
+  const st = lenGet(), list = h("div", {}), info = h("p", { class: "small mut", "aria-live": "polite", style: "margin:.3rem 0" });
+  const inp = (label, key) => { const i = h("input", { type: "text", inputmode: "decimal", autocomplete: "off", value: st[key], size: 4, maxlength: 6, "aria-label": `${label} length in minutes`, style: "width:3.6rem;margin-left:.25rem" });
+    i.addEventListener("input", () => { st[key] = i.value; lenSet(st); draw(); }); return i; };
+  const min = inp("Minimum", "min"), max = inp("Maximum", "max");
+  const clear = h("button", { type: "button", onclick: () => { st.min = st.max = ""; min.value = max.value = ""; lenSet(st); draw(); } }, "Clear");
+  function draw() {
+    const a = lenNum(st.min), b = lenNum(st.max); list.textContent = ""; info.className = "small mut";
+    for (const [i, x] of [[min, a], [max, b]]) i.setAttribute("aria-invalid", String(!!x.bad));
+    if (a.bad || b.bad) { info.className = "small err"; info.textContent = "Please enter minutes as a number from 0 to 10000 (e.g. 20 or 7.5)."; add(list, ...vids.map(v => videoCard(v, S.slug, isAdmin()))); return; }
+    if (a.v !== null && b.v !== null && a.v > b.v) { info.className = "small err"; info.textContent = "Min is larger than Max: no video can match."; return; }
+    const ok = v => v.durationSeconds == null || ((a.v === null || v.durationSeconds >= a.v * 60) && (b.v === null || v.durationSeconds <= b.v * 60));
+    const shown = vids.filter(ok), unknown = shown.filter(v => v.durationSeconds == null).length, active = a.v !== null || b.v !== null;
+    clear.hidden = !active && !st.min && !st.max;
+    info.textContent = !active ? "" : shown.length ? `Showing ${shown.length} of ${vids.length} yoga videos${unknown ? ` (${unknown} with unknown length always shown)` : ""}.` : `No yoga video for this muscle is ${a.v !== null && b.v !== null ? `${a.v}–${b.v}` : a.v !== null ? `at least ${a.v}` : `at most ${b.v}`} minutes long (${vids.length} without the filter).`;
+    add(list, ...shown.map(v => videoCard(v, S.slug, isAdmin()))); }
+  draw();
+  return [h("div", { class: "row small lenfilter", role: "group", "aria-label": "Filter yoga videos by length" }, h("label", {}, "Min", min), h("label", {}, "Max", max), h("span", { class: "mut" }, "minutes"), clear), info, list];
+}
 const fmtDate = d => (d ? new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "date unknown");
 const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 
@@ -57,9 +98,9 @@ function videoCard(v, slug, admin) {
   const media = h("button", { class: "thumb", type: "button", disabled: !canPlay, "aria-label": canPlay ? `Play video: ${v.title}` : `Video unavailable: ${v.title}`, onclick: () => openPlayer(v) },
     v.thumbnailUrl ? h("img", { src: v.thumbnailUrl, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }) : h("div", { class: "noimg" }, canPlay ? "" : "No thumbnail"), canPlay && h("span", { class: "playicon", "aria-hidden": "true" }, "▶"));
   const notes = h("textarea", { rows: 2, "aria-label": "Your private note", style: "width:100%", maxlength: 5000 }, v.notes || "");
-  return h("article", { class: "vid" + (v.isPrimary ? " primary" : "") }, media, h("div", {},
+  return h("article", { class: "vid" + (v.isPrimary ? " primary" : ""), "data-key": "v" + v.id }, media, h("div", {},
     h("h3", { style: "margin:0 0 .2rem;font-size:1rem" }, v.title),
-    h("div", { class: "small mut" }, `${fmtDate(v.publishedAt)} · ${creatorOf(v)} (YouTube)`),
+    h("div", { class: "small mut" }, `${fmtDate(v.publishedAt)}${v.durationSeconds ? " · " + fmtLen(v.durationSeconds) : ""} · ${creatorOf(v)} (YouTube)`),
     h("div", { class: "small", style: "margin:.3rem 0" }, v.isPrimary && h("span", { class: "tag ok" }, "★ Primary"), v.collection && S.collection === "all" && h("span", { class: "tag" }, COLL_LABEL[v.collection] || v.collection), v.isShort && h("span", { class: "tag" }, "Short (likely)"), v.unavailable && h("span", { class: "tag warn" }, "⚠ may be unavailable")),
     h("a", { href: v.canonicalUrl, target: "_blank", rel: "noopener noreferrer" }, "Watch on YouTube ↗"),
     admin && h("div", { class: "row small", style: "margin-top:.4rem" }, !v.isPrimary && h("button", { onclick: guard(async () => { await api("/api/admin/primary", { json: { videoId: v.id, slug } }); toast("Primary video set."); detail(); }) }, "Make primary"),
@@ -76,7 +117,9 @@ function openPlayer(v) { // large pop-up player (native <dialog>: Esc closes, fo
   dlg.showModal(); }
 $("#player").addEventListener("click", e => { if (e.target === $("#player")) $("#player").close(); });
 $("#player").addEventListener("close", () => { $("#player").textContent = ""; }); // removing the iframe stops playback
-const renderDetail = async () => { const my = ++detReq, box = $("#detail"); delete box.dataset.done; box.textContent = ""; crumbs();
+const renderDetail = async () => { const my = ++detReq, live = $("#detail"), box = h("div", {}); delete live.dataset.done; crumbs();
+  try { await drawDetail(my, box); } finally { if (my === detReq) live.replaceChildren(...box.childNodes); } };
+const drawDetail = async (my, box) => {
   if (S.slug) { const m = by(S.slug), vids = await api(`/api/muscles/${S.slug}/videos?collection=${S.collection}`); if (my !== detReq) return;
     add(box, h("h2", { tabindex: -1 }, m.commonName), h("p", { class: "mut" }, m.slug === "full-body" ? "Not tied to one area of the body" : `${m.anatomicalName}${m.isGroup ? " · muscle group" : ""} · ${REGIONS[m.region] || m.region}`), m.description && h("p", {}, m.description),
       m.aliases.length > 0 && h("p", { class: "small" }, "Also known as: ", m.aliases.join(", ")),
@@ -85,8 +128,8 @@ const renderDetail = async () => { const my = ++detReq, box = $("#detail"); dele
     if (!vids.length) { const who = { all: "No videos", release: "No muscle-release videos", yoga: "No yoga videos" }[S.collection];
       add(box, h("p", {}, `${who} for this muscle yet. New uploads are added automatically after a sync, or you can import a link in Admin.`));
       if (S.collection !== "all") { const other = await api(`/api/muscles/${S.slug}/videos?collection=all`); if (my !== detReq) return; if (other.length) add(box, h("p", { class: "small" }, `${other.length} video${other.length > 1 ? "s" : ""} for this muscle ${other.length > 1 ? "are" : "is"} in the other collection. `, h("button", { onclick: () => setCollection("all") }, "Show all videos"))); } return; }
-    if (S.collection === "all") { for (const k of ["release", "yoga"]) { const g = vids.filter(v => v.collection === k); if (!g.length) continue; add(box, h("h3", { class: "grp" }, `${COLL_LABEL[k]} (${g.length})`), k === "yoga" && S.slug !== "full-body" && yogaNote.cloneNode(true), ...g.map(v => videoCard(v, S.slug, isAdmin()))); } }
-    else add(box, S.collection === "yoga" && S.slug !== "full-body" && yogaNote, ...vids.map(v => videoCard(v, S.slug, isAdmin()))); return; }
+    if (S.collection === "all") { for (const k of ["release", "yoga"]) { const g = vids.filter(v => v.collection === k); if (!g.length) continue; add(box, h("h3", { class: "grp" }, `${COLL_LABEL[k]} (${g.length})`), k === "yoga" && S.slug !== "full-body" && yogaNote.cloneNode(true), ...(k === "yoga" ? yogaList(g) : g.map(v => videoCard(v, S.slug, isAdmin())))); } }
+    else add(box, S.collection === "yoga" && S.slug !== "full-body" && yogaNote, ...(S.collection === "yoga" ? yogaList(vids) : vids.map(v => videoCard(v, S.slug, isAdmin())))); return; }
   if (S.region) { box.append(h("h2", {}, REGIONS[S.region] || S.region), h("ul", { class: "list" }, S.muscles.filter(m => m.region === S.region).map(m => h("li", {}, h("button", { onclick: () => select(m.slug) }, m.commonName))))); return; }
   box.append(h("p", {}, "Select an area of the body, then choose a muscle to view the creator’s related videos."));
   const rec = await api(`/api/recent?collection=${S.collection}`); if (my !== detReq) return; if (!rec.length) box.append(h("p", { class: "mut" }, "No videos yet. Open Admin to run a sync or import a YouTube link."));
@@ -94,7 +137,7 @@ const renderDetail = async () => { const my = ++detReq, box = $("#detail"); dele
     add(box, h("h3", {}, "Recently added ", n > 0 && h("span", { class: "badge", id: "newBadge" }, `${n} new since your last visit`)),
       h("ul", { class: "list" }, rec.map(v => h("li", { class: "small" }, isNew(v) && h("span", { class: "tag ok" }, "NEW"), S.collection === "all" && h("span", { class: "tag" }, COLL_LABEL[v.collection] || ""), `${fmtDate(v.publishedAt)} · `, h("a", { href: v.canonicalUrl, target: "_blank", rel: "noopener noreferrer" }, v.title))))); } };
 // data-done = "<collection>:<muscle>" once the panel is completely drawn for that state (tests wait for it; a stale response never sets it)
-const detail = guard(async () => { const next = detReq + 1; await renderDetail(); if (detReq === next) $("#detail").dataset.done = `${S.collection}:${S.slug || ""}`; });
+const detail = guard(async () => { const next = detReq + 1; await keepPlace($("#detail"), renderDetail); if (detReq === next) $("#detail").dataset.done = `${S.collection}:${S.slug || ""}`; });
 
 
 
@@ -110,8 +153,8 @@ function reviewCard(v, skipped) {
   const reason = h("input", { placeholder: "Reason to ignore (optional)", maxlength: 300 });
   const why = (v.ignoredReason || "Ignored").replace(/^\[auto\] /, "Skipped automatically: ");
   const after = async () => { await loadMuscles(); await refreshMap(); renderAdmin(); };
-  return h("article", { class: "vid" }, h("div", {}, v.thumbnailUrl ? h("img", { src: v.thumbnailUrl, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }) : "", h("a", { href: v.canonicalUrl, target: "_blank", rel: "noopener noreferrer", class: "small" }, "Open on YouTube ↗")),
-    h("div", {}, h("h3", { style: "margin:0;font-size:1rem" }, v.title), h("div", { class: "small mut" }, `${fmtDate(v.publishedAt)} · ${COLL_LABEL[v.collection] || ""} · source: ${v.source}${v.isShort ? " · short (likely)" : ""}`),
+  return h("article", { class: "vid", "data-key": "r" + v.id }, h("div", {}, v.thumbnailUrl ? h("img", { src: v.thumbnailUrl, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }) : "", h("a", { href: v.canonicalUrl, target: "_blank", rel: "noopener noreferrer", class: "small" }, "Open on YouTube ↗")),
+    h("div", {}, h("h3", { style: "margin:0;font-size:1rem" }, v.title), h("div", { class: "small mut" }, `${fmtDate(v.publishedAt)}${v.durationSeconds ? " · " + fmtLen(v.durationSeconds) : ""} · ${COLL_LABEL[v.collection] || ""} · source: ${v.source}${v.isShort ? " · short (likely)" : ""}`),
       skipped && h("div", { class: "small warn" }, why), h("div", { class: "small mut" }, skipped ? "To put it on the map, choose the muscle(s):" : "Choose the muscle(s):"), chips, sel,
       h("div", { class: "row", style: "margin-top:.4rem" }, h("button", { class: "on", onclick: guard(async () => { const slugs = [...chips.querySelectorAll("input:checked")].map(i => i.dataset.slug); await api("/api/admin/approve", { json: { videoId: v.id, slugs } }); toast("Added to the map."); await after(); }) }, "Add to map"),
         skipped && h("button", { onclick: guard(async () => { const r = await api("/api/admin/reset-video", { json: { videoId: v.id } }); if (r.queued) return toast(QUEUED); toast(r.result === "map" ? "Mapped automatically from the title." : "Still no match in the title."); await after(); }) }, "Reset to automatic"),
@@ -120,7 +163,7 @@ function reviewCard(v, skipped) {
 }
 function foreverCard(v) {
   const note = (v.ignoredReason || "").replace(/^\[forever\]\s*/, "");
-  return h("article", { class: "vid" }, h("div", {}, v.thumbnailUrl ? h("img", { src: v.thumbnailUrl, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }) : "", h("a", { href: v.canonicalUrl, target: "_blank", rel: "noopener noreferrer", class: "small" }, "Open on YouTube ↗")),
+  return h("article", { class: "vid", "data-key": "f" + v.id }, h("div", {}, v.thumbnailUrl ? h("img", { src: v.thumbnailUrl, alt: "", loading: "lazy", referrerpolicy: "no-referrer" }) : "", h("a", { href: v.canonicalUrl, target: "_blank", rel: "noopener noreferrer", class: "small" }, "Open on YouTube ↗")),
     h("div", {}, h("h3", { style: "margin:0;font-size:1rem" }, v.title), h("div", { class: "small mut" }, `${fmtDate(v.publishedAt)} · ${COLL_LABEL[v.collection] || ""} · ignored forever${note ? ": " + note : ""}`),
       h("div", { class: "row", style: "margin-top:.4rem" }, h("button", { onclick: guard(async () => { const r = await api("/api/admin/reset-video", { json: { videoId: v.id } }); if (r.queued) return toast(QUEUED); toast(r.result === "map" ? "Un-ignored and mapped automatically." : "Un-ignored. It is back in Skipped videos."); await loadMuscles(); await refreshMap(); renderAdmin(); }) }, "Un-ignore"))));
 }
@@ -151,8 +194,9 @@ function renderLogin() { const P = $("#adminPane"); P.textContent = "";
   P.append(h("section", { class: "card", style: "max-width:28rem" }, h("h2", {}, "Admin login"), field("Password", pw), h("label", { class: "small", style: "display:block;margin:.4rem 0" }, keep, " Remember this device"), h("button", { class: "on", onclick: go }, "Log in"), msg)); pw.focus(); }
 const staticCard = () => h("section", { class: "card" }, h("h2", {}, "Hosting: GitHub Pages"), h("p", { class: "small mut" }, "Changes are saved as commits in the GitHub repository. A GitHub Action applies them and republishes the site, usually within 1–2 minutes. YouTube is also checked automatically every 6 hours; checks that find nothing new are only listed in the repository’s Actions tab, not under History."),
   h("button", { onclick: () => { if (confirm("Log out on this device? You will need the password again.")) { StaticApi.logout(); renderAdmin(); detail(); } } }, "Log out on this device"));
-const renderAdmin = guard(async () => { const P = $("#adminPane"); if (STATIC && !isAdmin()) return renderLogin(); P.textContent = "Loading…";
-  const [diag, rev, runs] = await Promise.all([api("/api/admin/diagnostics"), api("/api/admin/review"), api("/api/admin/sync-runs")]); await badge(); P.textContent = "";
+const renderAdmin = guard(async () => { const P = $("#adminPane"); if (STATIC && !isAdmin()) return renderLogin(); if (!P.childElementCount) P.textContent = "Loading…";
+  const [diag, rev, runs] = await Promise.all([api("/api/admin/diagnostics"), api("/api/admin/review"), api("/api/admin/sync-runs")]); await badge();
+  const forever = $("#foreverBox")?.open; await keepPlace(P, async () => { P.textContent = "";
   const out = h("pre", { "aria-live": "polite", hidden: true }); const show = t => { out.hidden = false; out.textContent = t; };
   const scope = h("select", { "aria-label": "Channel" }, h("option", { value: "all" }, "Both channels"), h("option", { value: "release" }, "Muscle release only"), h("option", { value: "yoga" }, "Yoga only")); const scopes = () => (scope.value === "all" ? ["release", "yoga"] : [scope.value]);
   const syncBtn = (label, body) => h("button", { onclick: guard(async () => { show("Working…"); try { const r = await apiQ("/api/admin/sync", { json: { ...body, collection: scope.value } }); if (r.queued) show("Sync requested. GitHub runs it in about 1–2 minutes; the result appears at the bottom right and under History."); else show(summarize(r)); } finally { if (!STATIC) { await loadMuscles(); await refreshMap(); setTimeout(renderAdmin, 2500); } } }) }, label);
@@ -184,7 +228,7 @@ const renderAdmin = guard(async () => { const P = $("#adminPane"); if (STATIC &&
     h("section", { class: "card" }, h("h2", {}, "Backup, export & import"), h("div", { class: "row" }, h("a", { href: H("/api/admin/backup"), download: "" }, "Download database backup"), " · ", h("a", { href: H("/api/admin/export.json"), download: "" }, "Export JSON"), " · ", h("a", { href: H("/api/admin/export.csv"), download: "" }, "Export CSV")),
       (() => { const mk = (label, path, raw, hint) => { const f = h("input", { type: "file", "aria-label": label }); return h("div", { style: "margin:.6rem 0" }, h("div", { class: "small" }, label, hint && h("span", { class: "mut" }, " — " + hint)), f, h("button", { onclick: guard(async () => { const file = f.files[0]; if (!file) throw new Error("Choose a file first."); if (path.includes("restore") && !confirm("Replace ALL local data with this backup? A safety backup is made first.")) return;
         const body = raw ? await file.arrayBuffer() : await file.text(); const r = await api(path, { body: path.includes("json") ? body : body }); show(JSON.stringify(r, null, 2)); await loadMuscles(); await refreshMap(); toast("Done."); }) }, "Upload")); };
-        return [mk("Import CSV", "/api/admin/import-csv", false, "columns: platform,url,title,description,publishedAt,muscleSlugs,notes"), mk("Import JSON (merge; never overwrites your review decisions)", "/api/admin/import-json", false), mk("Restore database backup (replaces everything)", "/api/admin/restore", true)]; })(), out)); P.dataset.render = String(++adminRenders); });
+        return [mk("Import CSV", "/api/admin/import-csv", false, "columns: platform,url,title,description,publishedAt,muscleSlugs,notes"), mk("Import JSON (merge; never overwrites your review decisions)", "/api/admin/import-json", false), mk("Restore database backup (replaces everything)", "/api/admin/restore", true)]; })(), out)); if (forever) $("#foreverBox").open = true; }); P.dataset.render = String(++adminRenders); });
 
 const tab = t => { $("#library").hidden = t !== "library"; $("#adminPane").hidden = t !== "admin"; for (const n of ["library", "admin"]) $("#tab-" + n).setAttribute("aria-pressed", String(n === t)); if (t === "admin") renderAdmin(); else applyView(); };
 $("#tab-library").onclick = () => tab("library"); $("#tab-admin").onclick = () => tab("admin");

@@ -14,7 +14,7 @@ function project() { // a throw-away copy of what the GitHub Action sees
   const d = mkdtempSync(join(tmpdir(), "mmap-gh-")); for (const x of ["src", "public", "package.json"]) cpSync(join(ROOT, x), join(d, x), { recursive: true });
   mkdirSync(join(d, "state")); mkdirSync(join(d, "ops")); writeFileSync(join(d, "ops/.gitkeep"), "");
   const db = openDb(":memory:"); seedCatalog(db);
-  const a = insertVideo(db, { youtubeVideoId: "AAAAAAAAAAA", title: "How to Release Your Piriformis", source: "youtube-sync", requireRelease: true });
+  const a = insertVideo(db, { youtubeVideoId: "AAAAAAAAAAA", durationSeconds: 754, title: "How to Release Your Piriformis", source: "youtube-sync", requireRelease: true });
   const b = insertVideo(db, { youtubeVideoId: "BBBBBBBBBBB", title: "My Chronic Pain Journey", source: "youtube-sync", requireRelease: true });
   saveState(db, join(d, "state/db.json")); return { d, a, b };
 }
@@ -59,7 +59,8 @@ test("built site: no secret anywhere, admin token decrypts only with the passwor
     const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b(k.salt), iterations: k.iter, hash: "SHA-256" }, k0, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
     return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b(k.iv) }, key, b(k.ct))); };
   assert.equal(await dec(PW), TOKEN); await assert.rejects(dec("wrong"));
-  const html = readFileSync(join(site, "index.html"), "utf8"); assert.match(html, /src="static-api\.js\?v=\d{14}"/); assert.match(html, /src="app\.js\?v=\d{14}"/); assert.match(html, /Content-Security-Policy/); assert.ok(!html.includes('src="/'));
+  const vids = JSON.parse(readFileSync(join(site, "api/videos/piriformis.release.json"), "utf8")); assert.equal(vids[0].durationSeconds, 754, "videos carry their length (yoga length filter)");
+  const html = readFileSync(join(site, "index.html"), "utf8"); assert.match(html, /<link rel="icon" href="data:image\/svg\+xml,[^"]*%F0%9F%92%AA/, "💪 favicon"); assert.match(html, /src="static-api\.js\?v=\d{14}"/); assert.match(html, /src="app\.js\?v=\d{14}"/); assert.match(html, /Content-Security-Policy/); assert.ok(!html.includes('src="/'));
 });
 
 test("without the secrets the site still builds, and the login explains what is missing", () => {
