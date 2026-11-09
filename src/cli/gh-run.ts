@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, writeFileSync, unlinkSync, existsSync, mkdte
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
-import { loadState, saveState } from "../lib/state.ts";
+import { loadState, saveState, serializeState } from "../lib/state.ts";
 import { createServer } from "../server.ts";
 
 const STATE = process.env.STATE_PATH ?? "state/db.json", OPS = process.env.OPS_DIR ?? "ops", REPORTS = process.env.REPORTS_PATH ?? "state/reports.json";
@@ -15,6 +15,7 @@ const db = loadState(STATE);
 const srv = createServer({ db, apiKey: process.env.YOUTUBE_API_KEY || undefined, dataDir: mkdtempSync(join(tmpdir(), "mmap-")) });
 await new Promise<void>(r => srv.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+const before = serializeState(db, true); // after loading: includes upgrades a new app version made to the data
 const reports: any[] = existsSync(REPORTS) ? JSON.parse(readFileSync(REPORTS, "utf8")) : [];
 
 async function post(path: string, body: string | Buffer) {
@@ -39,9 +40,12 @@ for (const f of files) {
   } catch (e) { log(id, "?", { status: 500, result: { error: (e as Error).message } }); }
   unlinkSync(file); // processed (successfully or not): never replay it
 }
-if (SYNC === "incremental" || SYNC === "full") log(`sync-${Date.now()}`, "/api/admin/sync", await post("/api/admin/sync", JSON.stringify({ mode: SYNC })));
-
+let quiet = false; // a scheduled check that found nothing new: no commit (otherwise the repository would get 4 empty commits a day)
+if (SYNC === "incremental" || SYNC === "full") {
+  const res = await post("/api/admin/sync", JSON.stringify({ mode: SYNC })); const r = res.result as any;
+  quiet = !files.length && res.status < 400 && r?.status === "successful" && !r.added && !r.updated && serializeState(db, true) === before && existsSync(STATE);
+  if (!quiet) log(`sync-${Date.now()}`, "/api/admin/sync", res); else console.log(`✓ ${SYNC} sync: nothing new (scanned ${r.scanned}); state left unchanged.`);
+}
 srv.close();
-saveState(db, STATE);
-writeFileSync(REPORTS, JSON.stringify(reports.slice(0, KEEP_REPORTS), null, 1) + "\n");
+if (!quiet) { saveState(db, STATE); writeFileSync(REPORTS, JSON.stringify(reports.slice(0, KEEP_REPORTS), null, 1) + "\n"); }
 console.log(`Processed ${files.length} admin change(s)${SYNC ? ` and a ${SYNC} sync` : ""}.`);

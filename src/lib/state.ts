@@ -29,11 +29,15 @@ export function loadState(path: string): Db {
   return db;
 }
 
+/** The state file's text. withoutRuns: everything except the sync history (to detect "nothing really changed"). */
+export function serializeState(db: Db, withoutRuns = false): string {
+  const part = (t: string) => { const rows = db.prepare(`SELECT * FROM ${t} ORDER BY ${ORDER[t] ?? "id"}`).all();
+    return `"${t}":[` + (rows.length ? "\n" + rows.map(r => JSON.stringify(r)).join(",\n") + "\n" : "") + "]"; };
+  return `{"app":"elite-massage-muscle-map","schemaVersion":${SCHEMA_VERSION},"tables":{\n${TABLES.filter(t => !withoutRuns || t !== "sync_runs").map(part).join(",\n")}\n}}\n`;
+}
 export function saveState(db: Db, path: string) {
   const runs = db.prepare(`SELECT id FROM sync_runs ORDER BY id DESC LIMIT 1 OFFSET ${KEEP_SYNC_RUNS - 1}`).get() as { id: number } | undefined;
   if (runs) db.prepare("DELETE FROM sync_runs WHERE id < ?").run(runs.id);
-  const part = (t: string) => { const rows = db.prepare(`SELECT * FROM ${t} ORDER BY ${ORDER[t] ?? "id"}`).all();
-    return `"${t}":[` + (rows.length ? "\n" + rows.map(r => JSON.stringify(r)).join(",\n") + "\n" : "") + "]"; };
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `{"app":"elite-massage-muscle-map","schemaVersion":${SCHEMA_VERSION},"tables":{\n${TABLES.map(part).join(",\n")}\n}}\n`);
+  writeFileSync(path, serializeState(db));
 }

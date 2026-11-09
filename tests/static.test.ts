@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { openDb, seedCatalog } from "../src/lib/db.ts";
 import { insertVideo, approveVideo } from "../src/lib/admin.ts";
 import { loadState, saveState } from "../src/lib/state.ts";
+import { pathToFileURL } from "node:url";
 
 const ROOT = join(import.meta.dirname, "..");
 function project() { // a throw-away copy of what the GitHub Action sees
@@ -58,10 +59,34 @@ test("built site: no secret anywhere, admin token decrypts only with the passwor
     const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b(k.salt), iterations: k.iter, hash: "SHA-256" }, k0, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
     return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b(k.iv) }, key, b(k.ct))); };
   assert.equal(await dec(PW), TOKEN); await assert.rejects(dec("wrong"));
-  const html = readFileSync(join(site, "index.html"), "utf8"); assert.match(html, /src="static-api\.js"/); assert.match(html, /Content-Security-Policy/); assert.ok(!html.includes('src="/'));
+  const html = readFileSync(join(site, "index.html"), "utf8"); assert.match(html, /src="static-api\.js\?v=\d{14}"/); assert.match(html, /src="app\.js\?v=\d{14}"/); assert.match(html, /Content-Security-Policy/); assert.ok(!html.includes('src="/'));
 });
 
 test("without the secrets the site still builds, and the login explains what is missing", () => {
   const { d } = project(); run(d, "src/cli/build-site.ts", { ADMIN_PASSWORD: "", ADMIN_TOKEN: "" });
   assert.deepEqual(JSON.parse(readFileSync(join(d, "site/admin-key.json"), "utf8")).missing, ["ADMIN_PASSWORD", "ADMIN_TOKEN"]);
+});
+
+test("Action sync: nothing new → no state change at all; new uploads → saved and reported; YouTube error → reported", () => {
+  const { d } = project(); const mock = pathToFileURL(join(ROOT, "tests/fixtures/mock-youtube.mjs")).href;
+  const db0 = loadState(join(d, "state/db.json")); // give both channels an uploads playlist and make the two videos "synced" ones
+  db0.prepare("UPDATE settings SET value='UUrelease' WHERE key='uploadsPlaylistId'").run(); if (!db0.prepare("SELECT 1 FROM settings WHERE key='uploadsPlaylistId'").get()) db0.prepare("INSERT INTO settings(key,value) VALUES('uploadsPlaylistId','UUrelease')").run();
+  db0.prepare("UPDATE videos SET import_source='youtube-sync'").run(); saveState(db0, join(d, "state/db.json"));
+  const env = (x: Record<string, string> = {}) => ({ SYNC_MODE: "incremental", YOUTUBE_API_KEY: "AIzaTEST", NODE_OPTIONS: `--import ${mock}`, ...x });
+  run(d, "src/cli/gh-run.ts", env()); // the first run may store channel details: settle
+  const s1 = readFileSync(join(d, "state/db.json"), "utf8"), r1 = existsSync(join(d, "state/reports.json")) ? readFileSync(join(d, "state/reports.json"), "utf8") : "";
+  const out = run(d, "src/cli/gh-run.ts", env());
+  assert.match(out, /nothing new/); assert.equal(readFileSync(join(d, "state/db.json"), "utf8"), s1); assert.equal(existsSync(join(d, "state/reports.json")) ? readFileSync(join(d, "state/reports.json"), "utf8") : "", r1);
+  writeFileSync(join(d, "new.json"), JSON.stringify([{ id: "NEWVIDEO001", title: "Soleus release for runners", collection: "release" }]));
+  run(d, "src/cli/gh-run.ts", env({ MOCK_NEW: join(d, "new.json") }));
+  const db = loadState(join(d, "state/db.json")); assert.equal((db.prepare("SELECT processing_status s FROM videos WHERE youtube_video_id='NEWVIDEO001'").get() as any).s, "automatically-mapped");
+  assert.equal(JSON.parse(readFileSync(join(d, "state/reports.json"), "utf8"))[0].result.added, 1);
+  run(d, "src/cli/gh-run.ts", env({ MOCK_YT_FAIL: "1" }));
+  const top = JSON.parse(readFileSync(join(d, "state/reports.json"), "utf8"))[0]; assert.notEqual(top.result.status, "successful"); assert.match(JSON.stringify(top.result.errors), /quota/i);
+});
+
+test("upload script: only app files are listed, live data folders are never part of the code upload", async () => {
+  const { INCLUDE } = await import("../tools/deploy.mjs?list");
+  for (const x of ["state", "ops", "data", "node_modules", ".env.local", "site"]) assert.ok(!INCLUDE.includes(x), x);
+  for (const x of ["src", "public", ".github", "package.json", "tools", "deploy.cmd"]) assert.ok(INCLUDE.includes(x), x);
 });

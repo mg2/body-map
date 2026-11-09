@@ -34,7 +34,7 @@ Troubleshooting: *API not enabled* → step 3; *invalid key* → re-copy; *403 /
 The site is published to **https://mg2.github.io/body-map/** by `.github/workflows/pages.yml`. The data lives in the repository (`state/db.json`).
 - **Reading** is static. On every run the Action renders all API answers into files (`site/api/...`). No server is needed.
 - **Admin changes** from the browser are committed as small files in `ops/`. The Action replays them against the same server code as `npm start`, commits `state/db.json`, and redeploys. Changes are live after about 1–2 minutes. The result of each change appears in a small box at the bottom right.
-- **YouTube sync** runs in the Action every 6 hours (incremental), whenever you press a sync button in Admin, or manually via *Actions → Sync, apply admin changes & deploy → Run workflow*. The API key never leaves GitHub's secret store.
+- **YouTube sync** runs in the Action every 6 hours (incremental; a check that finds nothing new makes no commit), whenever you press a sync button in Admin, or manually via *Actions → Sync, apply admin changes & deploy → Run workflow*. The API key never leaves GitHub's secret store.
 - **Login.** Static pages cannot read secrets, and writing to the repository needs a GitHub token. So the Action stores the token **encrypted** with your admin password (PBKDF2-SHA256, 600k iterations + AES-GCM) in `admin-key.json`. The password unlocks it in the browser, and with "Remember this device" the token stays in that browser. Use *Log out on this device* to forget it.
 
 **Setup (once):**
@@ -43,6 +43,15 @@ The site is published to **https://mg2.github.io/body-map/** by `.github/workflo
 3. Push this project. The first run publishes the site.
 
 **Security notes.** Everything in the repository and on the site is public on a free account, including private notes. Because `admin-key.json` is public, use a long password (4+ random words): the encryption is only as strong as the password. If a device is lost, revoke the token on GitHub, create a new one and update `ADMIN_TOKEN`. Changing `ADMIN_PASSWORD` alone does not log out devices that are already remembered.
+**Uploading a new version:** double-click `deploy.cmd` (or `node tools/deploy.mjs`). The script:
+1. runs all tests;
+2. downloads the repository into a temporary folder;
+3. replaces the code, but leaves the live data on GitHub (`state/`, `ops/`) untouched, so Admin changes made on the website are never overwritten;
+4. checks that the live data still builds with the new code and that no API key or token is included;
+5. shows the changed files, asks, commits and pushes.
+
+Options: `--dry-run` (show only), `--yes` (do not ask), `--skip-tests`. Only the files listed in `INCLUDE` in `tools/deploy.mjs` are uploaded; `data/`, `node_modules/`, `.env.local` and the npm shims never are. It needs Node.js ≥ 22.18 and Git for Windows (the first push opens a GitHub login window).
+
 **Moving local data:** `npm run state:from-db` copies `data/app.db` into `state/db.json`. `npm start` still runs the local version on its own `data/app.db`.
 
 ## Two channels: Muscle release and Yoga

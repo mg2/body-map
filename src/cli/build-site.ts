@@ -44,7 +44,7 @@ const build = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
 write("api/meta.json", JSON.stringify({ build, builtAt: new Date().toISOString(), repo: process.env.GITHUB_REPOSITORY ?? "", branch: process.env.GITHUB_REF_NAME || "main", doneOps: reports.map(r => r.id) }));
 
 // admin unlock file: the GitHub token, encrypted with the admin password
-const pw = process.env.ADMIN_PASSWORD ?? "", token = process.env.ADMIN_TOKEN ?? "";
+const pw = (process.env.ADMIN_PASSWORD ?? "").replace(/[\r\n]+$/, ""), token = (process.env.ADMIN_TOKEN ?? "").trim(); // a pasted secret often ends with a line break
 if (pw && token) {
   const enc = new TextEncoder(), b64 = (u: ArrayBuffer | Uint8Array) => Buffer.from(u as ArrayBuffer).toString("base64");
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
@@ -58,9 +58,9 @@ if (pw && token) {
 const CSP = "default-src 'self'; img-src 'self' https://i.ytimg.com data:; frame-src https://www.youtube-nocookie.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.github.com; base-uri 'none'; object-src 'none'";
 const html = readFileSync("public/index.html", "utf8")
   .replace("<head>", `<head><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="referrer" content="no-referrer"><meta name="theme-color" content="#1f6f9f">`)
-  .replace('<script src="/theme.js"></script>', '<script src="theme.js"></script>')
-  .replace('<script src="/app.js"></script>', '<script src="static-api.js"></script><script src="app.js"></script>');
-if (!html.includes('src="static-api.js"')) throw new Error("public/index.html changed: could not insert static-api.js");
+  .replace('<script src="/theme.js"></script>', `<script src="theme.js?v=${build}"></script>`)
+  .replace('<script src="/app.js"></script>', `<script src="static-api.js?v=${build}"></script><script src="app.js?v=${build}"></script>`); // new URLs per build: phones never mix old code with new data
+if (!html.includes(`src="static-api.js?v=${build}"`)) throw new Error("public/index.html changed: could not insert static-api.js");
 write("index.html", html);
 for (const f of ["app.js", "theme.js", "static-api.js"]) copyFileSync(join("public", f), join(OUT, f));
 write(".nojekyll", "");

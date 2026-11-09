@@ -39,6 +39,8 @@ window.StaticApi = (() => {
     const r = await fetch(`https://api.github.com/repos/${repo}${path}`, { method, cache: "no-store", headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) }, body: body && JSON.stringify(body) });
     const d = await r.json().catch(() => ({}));
     if (r.status === 401) { ls.del(TOKEN); throw Object.assign(new Error("The saved GitHub token is no longer valid (expired or revoked). Please log in again."), { status: 401 }); }
+    if ((r.status === 403 || r.status === 404) && method !== "GET") throw Object.assign(new Error(`GitHub refused the change (${r.status}): the token cannot write to ${repo}. It needs access to this repository with "Contents: Read and write"; update the ADMIN_TOKEN secret and log in again.`), { status: r.status });
+    if (r.status === 403 && /rate limit/i.test(d.message || "")) throw Object.assign(new Error("GitHub rate limit reached. Please try again in a few minutes."), { status: 403 });
     if (!r.ok) throw Object.assign(new Error(`GitHub: ${d.message || r.status}`), { status: r.status });
     return d; }
 
@@ -70,8 +72,10 @@ window.StaticApi = (() => {
       try { await gh("PUT", `/contents/ops/${id}.json`, { message: `admin: ${path.replace("/api/admin/", "")}`, content, branch }); break; }
       catch (e) { if ((e.status === 409 || e.status === 422 || e.status >= 500) && i < 4) { await sleep(700 * (i + 1)); continue; } throw e; } }
     setPending([...pending(), { id, path, at: op.at }]); status(); poll();
-    return { queued: true, id }; }
+    throw Object.assign(new Error("Saved to GitHub."), { queued: true, id }); } // ends the calling handler: nothing changes on this page until the Action has applied it
   async function request(path, o = {}) { const post = o.method === "POST" || o.json !== undefined || o.body !== undefined; return post ? write(path, o) : read(path); }
+  let busy = Promise.resolve(); // writes are committed one after another (parallel commits to one branch conflict)
+  const serial = (path, o) => (busy = busy.catch(() => {}).then(() => request(path, o)));
 
   // ---- status banner + polling until the Action has applied our changes
   const LABEL = p => p.replace("/api/admin/", "").replace(/[-/]/g, " ");
@@ -83,9 +87,9 @@ window.StaticApi = (() => {
     if (r.path.endsWith("/import-url")) return `${x.status === "added" ? "✓" : "✗"} Import: ${x.status}${x.error ? " · " + x.error : ""}`;
     if (r.path.endsWith("/channel/resolve")) return `✓ Resolved: ${x.title} (${x.channelId})`;
     return `✓ ${LABEL(r.path)} saved`; }
-  let bar = null, timer = null, lastLines = [];
+  let bar = null, timer = null, lastLines = [], applied = 0; // applied: finished "Action done → page refreshed" rounds (lets tests wait without guessing)
   function status(lines = lastLines) { lastLines = lines;
-    if (!bar) { bar = document.createElement("div"); bar.setAttribute("role", "status"); bar.style.cssText = "position:fixed;bottom:4.5rem;right:.5rem;z-index:50;max-width:min(26rem,92vw);background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:10px;padding:.5rem .7rem;font-size:.85rem;box-shadow:0 4px 18px #0003;pointer-events:none"; document.body.append(bar); } // click-through: never blocks the page
+    if (!bar) { bar = document.createElement("div"); bar.id = "ghStatus"; bar.setAttribute("role", "status"); bar.style.cssText = "position:fixed;bottom:4.5rem;right:.5rem;z-index:50;max-width:min(26rem,92vw);background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:10px;padding:.5rem .7rem;font-size:.85rem;box-shadow:0 4px 18px #0003;pointer-events:none"; document.body.append(bar); } // click-through: never blocks the page
     const n = pending().length; bar.textContent = ""; bar.hidden = !n && !lines.length;
     if (n) bar.append(`⏳ ${n} change${n > 1 ? "s" : ""} saved to GitHub, going live in about 1–2 minutes…`);
     for (const l of lines) { const d = document.createElement("div"); d.textContent = l; bar.append(d); }
@@ -98,9 +102,9 @@ window.StaticApi = (() => {
     setPending(list.filter(p => !done.includes(p) && !stale.includes(p)));
     const reports = await read("/api/admin/reports").catch(() => []);
     status([...done.map(p => { const r = reports.find(x => x.id === p.id); return r ? describe(r) : `✓ ${LABEL(p.path)} saved`; }), ...stale.map(p => `⚠ ${LABEL(p.path)}: no result after 30 min. Check the Actions tab on GitHub.`)]);
-    window.onStaticUpdate?.(); if (!pending().length) { clearInterval(timer); timer = null; } }
+    await window.onStaticUpdate?.(); applied++; if (!pending().length) { clearInterval(timer); timer = null; } }
   function poll() { if (!timer) timer = setInterval(check, 15_000); }
   document.addEventListener("DOMContentLoaded", () => { if (pending().length) { status(); poll(); check(); } });
 
-  return { request, mapSvg, href, isAdmin, unlock, logout, pendingCount: () => pending().length, repo: async () => (await loadMeta()).repo };
+  return { request: (p, o = {}) => (o.method === "POST" || o.json !== undefined || o.body !== undefined ? serial(p, o) : request(p, o)), mapSvg, href, isAdmin, unlock, logout, pendingCount: () => pending().length, appliedCount: () => applied, repo: async () => (await loadMeta()).repo };
 })();
