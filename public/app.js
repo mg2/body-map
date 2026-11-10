@@ -17,7 +17,7 @@ const QUEUED = "Saved to GitHub. Live in about 1–2 minutes; the result appears
 let metaPromise;
 const buildInfo = async () => { const m = await (metaPromise ||= api("/api/meta")), d = new Date(m.builtAt);
   const built = Number.isNaN(d.getTime()) ? "unbekannt" : new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(d).replace(",", "");
-  return h("p", { id: "buildInfo", class: "buildinfo" }, `v${m.version} · gebaut ${built}`); };
+  return h("p", { id: "buildInfo", class: "buildinfo" }, `v${m.version} · gebaut ${built} · made by Dimi 🤍 Sonet`); };
 /** Re-render `box` without losing your place: the page keeps its height while redrawing (so the browser never clamps the scroll
  *  to the top), then the card you were looking at goes back to the same spot on screen. If that card is gone (ignored, removed),
  *  the next one takes its place. Open notes and unsaved note text survive the redraw. */

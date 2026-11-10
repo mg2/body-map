@@ -25,7 +25,7 @@ def run_only(name, b):
     check("smoke: selecting a mapped muscle shows its video", "[TEST] How to release your quads" in pg.inner_text("#detail")); pg.close()
   elif name == "build-info":
     pg = b.new_page(viewport={"width": 1100, "height": 800}); pg.goto(U); pg.wait_for_selector("#map svg"); pg.click("#tab-admin"); pg.wait_for_selector("#adminPane > #buildInfo")
-    check("build-info: version and local build time are the first Admin line", re.fullmatch(r"v0\.20\.3 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo"); pg.close()
+    check("build-info: version and local build time are the first Admin line", re.fullmatch(r"v0\.20\.3 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} · made by Dimi 🤍 Sonet", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo"); pg.close()
   elif name == "bulk-undo":
     pg = b.new_page(viewport={"width": 1100, "height": 800}); pg.on("dialog", lambda d: d.accept()); pg.goto(U); pg.wait_for_selector("#map svg")
     pg.evaluate("""async () => { for (let i = 1; i <= 105; i++) await fetch('/api/admin/import-url', { method: 'POST', headers: { 'x-mmap': '1', 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://youtu.be/onlyBulk' + String(i).padStart(3, '0'), title: '[TEST] Calm evening flow ' + i, collection: 'yoga' }) }); }""")
@@ -160,7 +160,7 @@ try:
     pg.click("#tab-admin"); pg.wait_for_selector("text=Skipped videos (2)")
     disp = lambda s: pg.evaluate("(s) => getComputedStyle(document.querySelector(s)).display", s)
     check("the Admin tab REPLACES the Library (it does not show both at once)", disp("#library") == "none" and disp("#adminPane") != "none" and pg.evaluate("document.documentElement.scrollHeight") < 6000 and not pg.locator("#map svg").is_visible())
-    check("Admin starts with version and local build time", re.fullmatch(r"v0\.20\.3 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo")
+    check("Admin starts with version and local build time", re.fullmatch(r"v0\.20\.3 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} · made by Dimi 🤍 Sonet", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo")
     check("no review queue and no badge: only a Skipped list", pg.locator("#pendingBadge").is_hidden() and pg.locator("#adminPane section:has-text('Needs a decision')").is_hidden())
     stray = pg.evaluate("""() => { const c = document.querySelector('#adminPane').cloneNode(true); c.querySelectorAll('pre').forEach(p => p.remove()); const t = c.innerText; const m = t.match(/\\b(false|null|undefined|NaN)\\b|\\[object[^\\]]*\\]/); return m ? m[0] + ' @ ' + t.slice(Math.max(0, m.index - 40), m.index + 40) : null; }""")
     check("no stray false/null/undefined text on the Admin screen", stray is None); print("   ", stray)
