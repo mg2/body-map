@@ -109,9 +109,10 @@ test("server guards: localhost only, POST needs header, cross-origin blocked", (
 }));
 test("API key never appears in any response, page, script, export or error", () => withServer(async port => {
   await call(port, "POST", "/api/admin/import-url", { headers: H, body: { url: url(ID1), title: "Lats release" } });
-  const gets = ["/", "/app.js", "/theme.js", "/api/muscles", "/api/recent", "/api/map?view=anterior", "/api/admin/diagnostics", "/api/admin/review", "/api/admin/sync-runs", "/api/admin/export.json", "/api/admin/export.csv", "/api/muscles/latissimus-dorsi/videos", "/api/admin/backup"];
+  const gets = ["/", "/app.js", "/theme.js", "/api/meta", "/api/muscles", "/api/recent", "/api/map?view=anterior", "/api/admin/diagnostics", "/api/admin/review", "/api/admin/sync-runs", "/api/admin/export.json", "/api/admin/export.csv", "/api/muscles/latissimus-dorsi/videos", "/api/admin/backup"];
   for (const p of gets) { const r = await call(port, "GET", p); assert.equal(r.status, 200, p); assert.ok(!r.text.includes(SECRET), `key leaked in ${p}`); }
   const d = JSON.parse((await call(port, "GET", "/api/admin/diagnostics")).text); assert.equal(d.youtubeApiKeyConfigured, true); assert.ok(!JSON.stringify(d).includes("SECRET"));
+  const meta = JSON.parse((await call(port, "GET", "/api/meta")).text); assert.equal(meta.version, JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")).version); assert.ok(Number.isFinite(Date.parse(meta.builtAt)));
   const t = await call(port, "POST", "/api/admin/test-api", { headers: H, body: {} }); assert.ok(!t.text.includes(SECRET));
   const s = await call(port, "POST", "/api/admin/sync", { headers: H, body: { mode: "full" } }); assert.ok(!s.text.includes(SECRET));
 }, (async () => new Response("{}", { status: 403 })) as never));

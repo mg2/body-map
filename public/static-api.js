@@ -25,6 +25,7 @@ window.StaticApi = (() => {
     m = p.match(/^\/api\/admin\/(diagnostics|review|sync-runs|reports)$/); if (m) return `api/admin/${m[1]}.json`;
     return null; }
   async function read(path) {
+    if (new URL(path, "http://x").pathname === "/api/meta") return loadMeta();
     const f = fileFor(path); if (!f) throw new Error(`Not available on the static site: ${path}`);
     const { build } = await loadMeta(); const r = await fetch(`${f}?b=${build}`);
     if (r.status === 404 && f.startsWith("api/videos/")) return []; if (!r.ok) throw new Error(`Could not load ${f} (${r.status}).`);

@@ -14,6 +14,10 @@ async function api(path, o = {}) {
 const toast = (m, bad) => { const t = $("#toast"); t.textContent = ""; t.append(h("span", { class: "card " + (bad ? "err" : ""), style: "display:inline-block;pointer-events:auto" }, m)); clearTimeout(toast.t); toast.t = setTimeout(() => (t.textContent = ""), 6000); };
 const STATIC = !!window.StaticApi, isAdmin = () => !STATIC || StaticApi.isAdmin(), H = p => (STATIC ? StaticApi.href(p) : p);
 const QUEUED = "Saved to GitHub. Live in about 1–2 minutes; the result appears in the box at the bottom right.";
+let metaPromise;
+const buildInfo = async () => { const m = await (metaPromise ||= api("/api/meta")), d = new Date(m.builtAt);
+  const built = Number.isNaN(d.getTime()) ? "unbekannt" : new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(d).replace(",", "");
+  return h("p", { id: "buildInfo", class: "buildinfo" }, `v${m.version} · gebaut ${built}`); };
 /** Re-render `box` without losing your place: the page keeps its height while redrawing (so the browser never clamps the scroll
  *  to the top), then the card you were looking at goes back to the same spot on screen. If that card is gone (ignored, removed),
  *  the next one takes its place. Open notes and unsaved note text survive the redraw. */
@@ -187,20 +191,20 @@ function userAliasList() {
 }
 const summarize = r => `Status: ${r.status}\nScanned ${r.scanned}, added ${r.added}, updated ${r.updated}, skipped ${r.skipped}\nAuto-mapped ${r.autoMapped}, awaiting review ${r.awaitingReview}, ignored ${r.ignored}\nAPI requests ${r.apiRequests}${r.dryRun ? "\n(dry run: nothing saved)" : ""}${r.errors.length ? "\nErrors: " + r.errors.join("; ") : ""}\nStarted ${r.startedAt}\nFinished ${r.finishedAt}`;
 let adminRenders = 0; // completed Admin renders (the pane re-renders after many actions; tests wait for the next one)
-function renderLogin() { const P = $("#adminPane"); P.textContent = "";
+async function renderLogin() { const P = $("#adminPane"); P.textContent = "";
   const pw = h("input", { type: "password", autocomplete: "current-password", style: "width:100%", "aria-label": "Admin password" }), keep = h("input", { type: "checkbox", checked: true }), msg = h("p", { class: "small", "aria-live": "polite" });
   const go = guard(async () => { msg.textContent = "Checking…"; try { await StaticApi.unlock(pw.value, keep.checked); } catch (e) { msg.textContent = e.message; msg.className = "small err"; return; } pw.value = ""; toast("Logged in."); renderAdmin(); detail(); });
   pw.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
-  P.append(h("section", { class: "card", style: "max-width:28rem" }, h("h2", {}, "Admin login"), field("Password", pw), h("label", { class: "small", style: "display:block;margin:.4rem 0" }, keep, " Remember this device"), h("button", { class: "on", onclick: go }, "Log in"), msg)); pw.focus(); }
+  P.append(await buildInfo(), h("section", { class: "card", style: "max-width:28rem" }, h("h2", {}, "Admin login"), field("Password", pw), h("label", { class: "small", style: "display:block;margin:.4rem 0" }, keep, " Remember this device"), h("button", { class: "on", onclick: go }, "Log in"), msg)); pw.focus(); }
 const staticCard = () => h("section", { class: "card" }, h("h2", {}, "Hosting: GitHub Pages"), h("p", { class: "small mut" }, "Changes are saved as commits in the GitHub repository. A GitHub Action applies them and republishes the site, usually within 1–2 minutes. YouTube is also checked automatically every 6 hours; checks that find nothing new are only listed in the repository’s Actions tab, not under History."),
   h("button", { onclick: () => { if (confirm("Log out on this device? You will need the password again.")) { StaticApi.logout(); renderAdmin(); detail(); } } }, "Log out on this device"));
 const renderAdmin = guard(async () => { const P = $("#adminPane"); if (STATIC && !isAdmin()) return renderLogin(); if (!P.childElementCount) P.textContent = "Loading…";
-  const [diag, rev, runs] = await Promise.all([api("/api/admin/diagnostics"), api("/api/admin/review"), api("/api/admin/sync-runs")]); await badge();
+  const [diag, rev, runs, info] = await Promise.all([api("/api/admin/diagnostics"), api("/api/admin/review"), api("/api/admin/sync-runs"), buildInfo()]); await badge();
   const forever = $("#foreverBox")?.open; await keepPlace(P, async () => { P.textContent = "";
   const out = h("pre", { "aria-live": "polite", hidden: true }); const show = t => { out.hidden = false; out.textContent = t; };
   const scope = h("select", { "aria-label": "Channel" }, h("option", { value: "all" }, "Both channels"), h("option", { value: "release" }, "Muscle release only"), h("option", { value: "yoga" }, "Yoga only")); const scopes = () => (scope.value === "all" ? ["release", "yoga"] : [scope.value]);
   const syncBtn = (label, body) => h("button", { onclick: guard(async () => { show("Working…"); try { const r = await apiQ("/api/admin/sync", { json: { ...body, collection: scope.value } }); if (r.queued) show("Sync requested. GitHub runs it in about 1–2 minutes; the result appears at the bottom right and under History."); else show(summarize(r)); } finally { if (!STATIC) { await loadMuscles(); await refreshMap(); setTimeout(renderAdmin, 2500); } } }) }, label);
-  P.append(...(STATIC ? [staticCard()] : []), h("section", { class: "card", hidden: !rev.queue.length }, h("h2", {}, `Needs a decision (${rev.queue.length})`), rev.queue.map(v => reviewCard(v, false))),
+  P.append(info, ...(STATIC ? [staticCard()] : []), h("section", { class: "card", hidden: !rev.queue.length }, h("h2", {}, `Needs a decision (${rev.queue.length})`), rev.queue.map(v => reviewCard(v, false))),
     h("section", { class: "card" }, h("h2", {}, "Import a YouTube link"), (() => { const url = h("input", { type: "url", style: "width:100%", placeholder: "https://www.youtube.com/watch?v=…  or youtu.be/…  or /shorts/…" }), title = h("input", { placeholder: "Title (only needed without an API key)", style: "width:100%" }), pick = muscleSelect(), picked = new Set(), tags = h("span", {}), coll = h("select", { "aria-label": "Collection" }, h("option", { value: "release" }, "Muscle release"), h("option", { value: "yoga" }, "Yoga"));
       pick.addEventListener("change", () => { if (pick.value) { picked.add(pick.value); tags.textContent = [...picked].map(s => by(s).commonName).join(", "); } pick.value = ""; });
       return h("div", {}, field("Video URL", url), field("Title", title), field("Collection (yoga links are matched by body area or pose in the title)", coll), h("div", { class: "row" }, pick, tags), h("button", { onclick: guard(async () => { const r = await api("/api/admin/import-url", { json: { url: url.value, title: title.value, slugs: [...picked], collection: coll.value } }); if (r.queued) { url.value = title.value = ""; picked.clear(); tags.textContent = ""; return toast(QUEUED); }

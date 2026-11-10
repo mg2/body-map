@@ -110,6 +110,7 @@ try:
     pg.click("#tab-admin"); pg.wait_for_selector("text=Skipped videos (2)")
     disp = lambda s: pg.evaluate("(s) => getComputedStyle(document.querySelector(s)).display", s)
     check("the Admin tab REPLACES the Library (it does not show both at once)", disp("#library") == "none" and disp("#adminPane") != "none" and pg.evaluate("document.documentElement.scrollHeight") < 6000 and not pg.locator("#map svg").is_visible())
+    check("Admin starts with version and local build time", re.fullmatch(r"v0\.20\.0 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo")
     check("no review queue and no badge: only a Skipped list", pg.locator("#pendingBadge").is_hidden() and pg.locator("#adminPane section:has-text('Needs a decision')").is_hidden())
     stray = pg.evaluate("""() => { const c = document.querySelector('#adminPane').cloneNode(true); c.querySelectorAll('pre').forEach(p => p.remove()); const t = c.innerText; const m = t.match(/\\b(false|null|undefined|NaN)\\b|\\[object[^\\]]*\\]/); return m ? m[0] + ' @ ' + t.slice(Math.max(0, m.index - 40), m.index + 40) : null; }""")
     check("no stray false/null/undefined text on the Admin screen", stray is None); print("   ", stray)

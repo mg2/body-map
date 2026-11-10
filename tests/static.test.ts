@@ -51,7 +51,7 @@ test("built site: no secret anywhere, admin token decrypts only with the passwor
   const walk = (p: string) => { for (const e of readdirSync(p, { withFileTypes: true })) e.isDirectory() ? walk(join(p, e.name)) : all.push(join(p, e.name)); }; walk(site);
   for (const f of all) { const s = readFileSync(f, "latin1"); for (const secret of [PW, TOKEN, YT]) assert.ok(!s.includes(secret), `${secret} leaked into ${f}`); }
   for (const f of ["index.html", "app.js", "static-api.js", "theme.js", ".nojekyll", "api/meta.json", "api/muscles.all.json", "api/map.posterior.yoga.svg", "api/videos/piriformis.release.json", "api/admin/review.json", "api/admin/backup.db"]) assert.ok(existsSync(join(site, f)), f);
-  assert.equal(JSON.parse(readFileSync(join(site, "api/meta.json"), "utf8")).repo, "mg2/body-map");
+  const meta = JSON.parse(readFileSync(join(site, "api/meta.json"), "utf8")); assert.equal(meta.repo, "mg2/body-map"); assert.equal(meta.version, JSON.parse(readFileSync(join(d, "package.json"), "utf8")).version); assert.ok(Number.isFinite(Date.parse(meta.builtAt)));
   assert.equal(JSON.parse(readFileSync(join(site, "api/admin/diagnostics.json"), "utf8")).youtubeApiKeyConfigured, true);
   assert.deepEqual(JSON.parse(readFileSync(join(site, "api/videos/piriformis.release.json"), "utf8")).map((v: any) => v.youtubeVideoId), ["AAAAAAAAAAA"]);
   const k = JSON.parse(readFileSync(join(site, "admin-key.json"), "utf8")); const b = (s: string) => Buffer.from(s, "base64");

@@ -19,7 +19,7 @@ export interface ServerOptions { db: Db; apiKey?: string; fetchImpl?: typeof fet
 class HttpError extends Error { status: number; constructor(status: number, m: string) { super(m); this.status = status; } }
 
 export function createServer(o: ServerOptions) {
-  const { db } = o;
+  const { db } = o, builtAt = new Date().toISOString();
   const send = (res: http.ServerResponse, code: number, body: string | Buffer, type = "application/json; charset=utf-8", extra: Record<string, string> = {}) => {
     res.writeHead(code, { "content-type": type, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "content-security-policy": CSP, "cache-control": "no-store", ...extra }); res.end(body); };
   const json = (res: http.ServerResponse, data: unknown, code = 200) => send(res, code, JSON.stringify(data));
@@ -52,6 +52,7 @@ export function createServer(o: ServerOptions) {
     if (m === "GET" && p === "/app.js") return send(res, 200, readFileSync(join(ROOT, "public/app.js")), "text/javascript; charset=utf-8");
     // ---- public (viewer) API
     const coll = parseCollection(url.searchParams.get("collection")); // all | release | yoga
+    if (m === "GET" && p === "/api/meta") return json(res, { version: VERSION, builtAt });
     if (m === "GET" && p === "/api/muscles") return json(res, A.listMuscles(db, coll));
     if (m === "GET" && p === "/api/recent") return json(res, A.recentVideos(db, 10, coll));
     if (m === "GET" && p === "/api/map") {

@@ -10,6 +10,7 @@ import { createServer } from "../server.ts";
 import { backupDb } from "../lib/io.ts";
 
 const STATE = process.env.STATE_PATH ?? "state/db.json", REPORTS = process.env.REPORTS_PATH ?? "state/reports.json", OUT = process.env.SITE_DIR ?? "site";
+const VERSION: string = JSON.parse(readFileSync("package.json", "utf8")).version;
 export const PBKDF2_ITERATIONS = 600_000;
 
 const db = loadState(STATE);
@@ -40,8 +41,8 @@ const reports: any[] = existsSync(REPORTS) ? JSON.parse(readFileSync(REPORTS, "u
 write("api/admin/reports.json", JSON.stringify(reports));
 srv.close();
 
-const build = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-write("api/meta.json", JSON.stringify({ build, builtAt: new Date().toISOString(), repo: process.env.GITHUB_REPOSITORY ?? "", branch: process.env.GITHUB_REF_NAME || "main", doneOps: reports.map(r => r.id) }));
+const builtAt = new Date().toISOString(), build = builtAt.replace(/\D/g, "").slice(0, 14);
+write("api/meta.json", JSON.stringify({ build, version: VERSION, builtAt, repo: process.env.GITHUB_REPOSITORY ?? "", branch: process.env.GITHUB_REF_NAME || "main", doneOps: reports.map(r => r.id) }));
 
 // admin unlock file: the GitHub token, encrypted with the admin password
 const pw = (process.env.ADMIN_PASSWORD ?? "").replace(/[\r\n]+$/, ""), token = (process.env.ADMIN_TOKEN ?? "").trim(); // a pasted secret often ends with a line break
