@@ -1,12 +1,62 @@
-"""Browser end-to-end check (needs: pip install playwright && playwright install chromium). Run: python3 tests/e2e.py"""
-import subprocess, time, sys, urllib.request, re
+"""Browser end-to-end checks.
+
+Fast, focused run: python3 tests/e2e.py --only <section>
+Full release run:  python3 tests/e2e.py
+Needs: pip install playwright && playwright install chromium
+"""
+import argparse, os, subprocess, time, sys, urllib.request, re
 from playwright.sync_api import sync_playwright
+
+SECTIONS = ("smoke", "build-info", "bulk-undo", "theme", "mobile")
+parser = argparse.ArgumentParser()
+parser.add_argument("--only", choices=SECTIONS, help="run one isolated browser section instead of the release suite")
+args = parser.parse_args()
+
 srv = subprocess.Popen(["node", "tests/e2e-server.ts"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 srv.stdout.readline(); U = "http://localhost:4567"; ok = []
 def check(name, cond): ok.append(cond); print(("PASS " if cond else "FAIL ") + name)
+
+def run_only(name, b):
+  """Small sections deliberately start from the clean E2E server state and do not depend on the full suite."""
+  if name == "smoke":
+    pg = b.new_page(viewport={"width": 1100, "height": 800}); pg.goto(U); pg.wait_for_selector("#map svg")
+    check("smoke: home and body map render", "Select an area of the body" in pg.inner_text("#detail") and pg.locator("#map svg").is_visible())
+    pg.locator("#map [data-slug=quadriceps] path").first.dispatch_event("click"); pg.wait_for_selector("#detail article")
+    check("smoke: selecting a mapped muscle shows its video", "[TEST] How to release your quads" in pg.inner_text("#detail")); pg.close()
+  elif name == "build-info":
+    pg = b.new_page(viewport={"width": 1100, "height": 800}); pg.goto(U); pg.wait_for_selector("#map svg"); pg.click("#tab-admin"); pg.wait_for_selector("#adminPane > #buildInfo")
+    check("build-info: version and local build time are the first Admin line", re.fullmatch(r"v0\.20\.3 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo"); pg.close()
+  elif name == "bulk-undo":
+    pg = b.new_page(viewport={"width": 1100, "height": 800}); pg.on("dialog", lambda d: d.accept()); pg.goto(U); pg.wait_for_selector("#map svg")
+    pg.evaluate("""async () => { for (let i = 1; i <= 105; i++) await fetch('/api/admin/import-url', { method: 'POST', headers: { 'x-mmap': '1', 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://youtu.be/onlyBulk' + String(i).padStart(3, '0'), title: '[TEST] Calm evening flow ' + i, collection: 'yoga' }) }); }""")
+    pg.click("#tab-admin"); pg.wait_for_selector("#adminPane h2:has-text('Skipped videos (107)')")
+    skipped = pg.locator("#adminPane section:has(h2:has-text('Skipped videos'))")
+    skipped.locator("select[aria-label='Show collection']").select_option("yoga")
+    check("bulk-undo: focused run created and filtered 105 Yoga rows", "Showing 25 of 105" in skipped.inner_text())
+    skipped.locator("button:has-text('Ignore forever: all 105 auto-skipped Yoga videos')").click()
+    pg.wait_for_selector("#adminPane h2:has-text('Skipped videos (2)')"); pg.wait_for_selector("#foreverBox summary:has-text('Ignored forever (105)')")
+    check("bulk-undo: bulk ignore moved all 105 Yoga rows", True)
+    box = pg.locator("#foreverBox")
+    if not box.evaluate("el => el.open"):
+      box.locator("summary").click()
+    undo = box.locator("button:has-text('Undo bulk ignore: 105 Yoga videos')"); undo.wait_for(state="visible"); undo.click()
+    pg.wait_for_selector("#adminPane h2:has-text('Skipped videos (107)')"); pg.wait_for_selector("#foreverBox summary:has-text('Ignored forever (0)')")
+    check("bulk-undo: undo returned all rows to the automatic flow", True); pg.close()
+  elif name == "theme":
+    pg = b.new_page(viewport={"width": 1000, "height": 700}); pg.goto(U); pg.wait_for_selector("#map svg")
+    pg.click("#accentPicker [data-accent=green]"); check("theme: preset applies", pg.evaluate("document.documentElement.dataset.accent") == "green")
+    pg.fill("#accentCustom", "#ff8800"); check("theme: custom colour applies", pg.evaluate("document.documentElement.dataset.accent") == "custom" and pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--acc').trim()") == "#ff8800"); pg.close()
+  elif name == "mobile":
+    pg = b.new_page(viewport={"width": 390, "height": 800}); pg.goto(U); pg.wait_for_selector("#map svg")
+    check("mobile: map renders without horizontal page scroll", pg.locator("#map svg").is_visible() and pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")); pg.close()
+
 try:
   with sync_playwright() as p:
-    b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1100, "height": 800}); errs = []; dialogs = []
+    executable = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+    b = p.chromium.launch(**({"executable_path": executable} if executable else {}))
+    if args.only:
+      run_only(args.only, b); b.close(); print(f"{sum(ok)}/{len(ok)} passed ({args.only})"); raise SystemExit(0 if all(ok) else 1)
+    pg = b.new_page(viewport={"width": 1100, "height": 800}); errs = []; dialogs = []
     pg.on("console", lambda m: errs.append(m.text) if m.type == "error" else None); pg.on("pageerror", lambda e: errs.append(str(e))); ACCEPT = [False]; pg.on("dialog", lambda d: (dialogs.append(d.message), d.accept() if ACCEPT[0] else d.dismiss()))
     pg.goto(U); pg.wait_for_selector("#map svg")
     check("home message shown", "Select an area of the body" in pg.inner_text("#detail"))
@@ -110,7 +160,7 @@ try:
     pg.click("#tab-admin"); pg.wait_for_selector("text=Skipped videos (2)")
     disp = lambda s: pg.evaluate("(s) => getComputedStyle(document.querySelector(s)).display", s)
     check("the Admin tab REPLACES the Library (it does not show both at once)", disp("#library") == "none" and disp("#adminPane") != "none" and pg.evaluate("document.documentElement.scrollHeight") < 6000 and not pg.locator("#map svg").is_visible())
-    check("Admin starts with version and local build time", re.fullmatch(r"v0\.20\.0 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo")
+    check("Admin starts with version and local build time", re.fullmatch(r"v0\.20\.3 · gebaut \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", pg.inner_text("#adminPane > #buildInfo")) is not None and pg.locator("#adminPane > :first-child").get_attribute("id") == "buildInfo")
     check("no review queue and no badge: only a Skipped list", pg.locator("#pendingBadge").is_hidden() and pg.locator("#adminPane section:has-text('Needs a decision')").is_hidden())
     stray = pg.evaluate("""() => { const c = document.querySelector('#adminPane').cloneNode(true); c.querySelectorAll('pre').forEach(p => p.remove()); const t = c.innerText; const m = t.match(/\\b(false|null|undefined|NaN)\\b|\\[object[^\\]]*\\]/); return m ? m[0] + ' @ ' + t.slice(Math.max(0, m.index - 40), m.index + 40) : null; }""")
     check("no stray false/null/undefined text on the Admin screen", stray is None); print("   ", stray)
@@ -178,7 +228,9 @@ try:
     ACCEPT[0] = True; pg.click("#adminPane button:has-text('Ignore forever: all 105 auto-skipped Yoga videos')"); ACCEPT[0] = False
     pg.wait_for_selector("#adminPane h2:has-text('Skipped videos (1)')"); pg.wait_for_selector("#adminPane summary:has-text('Ignored forever (105)')")
     check("bulk ignore forever moves all 105 and leaves the muscle-release skip alone", True)
-    pg.click("#adminPane summary:has-text('Ignored forever')"); pg.click("#adminPane button:has-text('Undo bulk ignore: 105 Yoga videos')"); pg.wait_for_selector("#adminPane h2:has-text('Skipped videos (106)')"); pg.wait_for_selector("#adminPane summary:has-text('Ignored forever (0)')")
+    forever = pg.locator("#foreverBox")
+    if not forever.evaluate("el => el.open"): forever.locator("summary").click()
+    undo = forever.locator("button:has-text('Undo bulk ignore: 105 Yoga videos')"); undo.wait_for(state="visible"); undo.click(); pg.wait_for_selector("#adminPane h2:has-text('Skipped videos (106)')"); pg.wait_for_selector("#adminPane summary:has-text('Ignored forever (0)')")
     check("the bulk undo returns them to the automatic flow", True)
     pg.click("#tab-library")
     # ---- "new since your last visit" (first visit shows no badge; an older stored visit marks the recent videos)
