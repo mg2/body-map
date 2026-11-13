@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]            # code changes and admin changes (ops/*.json committed by the Admin page)
   schedule:
-    - cron: "17 */6 * * *"      # incremental YouTube sync every 6 hours
+    - cron: "17 3 * * *"        # incremental YouTube sync once a night (3:17 UTC)
   workflow_dispatch:
     inputs:
       sync:
@@ -23,17 +23,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  run:
+  sync-and-commit:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: main             # always the newest state, not the commit that triggered this run
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
 
@@ -53,6 +50,22 @@ jobs:
           for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep 5; done
           exit 1
 
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: always()
+    needs: sync-and-commit
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
       - name: Build site
         env:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
@@ -60,9 +73,9 @@ jobs:
           HAS_YOUTUBE_KEY: ${{ secrets.YOUTUBE_API_KEY != '' && '1' || '' }}
         run: node src/cli/build-site.ts
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

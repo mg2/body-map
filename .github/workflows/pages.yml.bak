@@ -1,0 +1,68 @@
+name: Sync, apply admin changes & deploy
+
+on:
+  push:
+    branches: [main]            # code changes and admin changes (ops/*.json committed by the Admin page)
+  schedule:
+    - cron: "17 */6 * * *"      # incremental YouTube sync every 6 hours
+  workflow_dispatch:
+    inputs:
+      sync:
+        description: "YouTube sync"
+        type: choice
+        options: [none, incremental, full]
+        default: none
+
+permissions:
+  contents: write               # commit state/db.json and remove processed ops
+  pages: write
+  id-token: write
+
+concurrency:
+  group: body-map               # one run at a time; a queued run always picks up ALL waiting ops
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main             # always the newest state, not the commit that triggered this run
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Apply admin changes / sync YouTube
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          SYNC_MODE: ${{ github.event_name == 'schedule' && 'incremental' || (inputs.sync != 'none' && inputs.sync || '') }}
+        run: node src/cli/gh-run.ts
+
+      - name: Commit state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A state ops
+          if git diff --cached --quiet; then echo "No state change."; exit 0; fi
+          git commit -m "state: apply admin changes / sync [skip ci]"
+          for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep 5; done
+          exit 1
+
+      - name: Build site
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          HAS_YOUTUBE_KEY: ${{ secrets.YOUTUBE_API_KEY != '' && '1' || '' }}
+        run: node src/cli/build-site.ts
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
