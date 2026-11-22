@@ -1,5 +1,15 @@
 [
  {
+  "id": "20261122075527775-ky9urc",
+  "path": "/api/admin/ignore-forever",
+  "at": "2026-11-22T07:55:52.596Z",
+  "ok": true,
+  "status": 200,
+  "result": {
+   "ok": true
+  }
+ },
+ {
   "id": "20261122075515559-qlcx23",
   "path": "/api/admin/ignore-forever",
   "at": "2026-11-22T07:55:23.249Z",
