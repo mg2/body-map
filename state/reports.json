@@ -1,5 +1,25 @@
 [
  {
+  "id": "20261122075650260-cfhvei",
+  "path": "/api/admin/ignore-forever",
+  "at": "2026-11-22T07:57:02.502Z",
+  "ok": true,
+  "status": 200,
+  "result": {
+   "ok": true
+  }
+ },
+ {
+  "id": "20261122075645859-2nsoss",
+  "path": "/api/admin/ignore-forever",
+  "at": "2026-11-22T07:57:02.498Z",
+  "ok": true,
+  "status": 200,
+  "result": {
+   "ok": true
+  }
+ },
+ {
   "id": "20261122075527775-ky9urc",
   "path": "/api/admin/ignore-forever",
   "at": "2026-11-22T07:55:52.596Z",
