@@ -1,5 +1,28 @@
 [
  {
+  "id": "sync-1795697226090",
+  "path": "/api/admin/sync",
+  "at": "2026-11-26T12:47:06.090Z",
+  "ok": true,
+  "status": 200,
+  "result": {
+   "runId": 13,
+   "status": "successful",
+   "scanned": 150,
+   "added": 1,
+   "updated": 0,
+   "skipped": 149,
+   "autoMapped": 1,
+   "awaitingReview": 0,
+   "ignored": 63,
+   "apiRequests": 6,
+   "errors": [],
+   "startedAt": "2026-11-26T12:47:04.988Z",
+   "finishedAt": "2026-11-26T12:47:06.087Z",
+   "dryRun": false
+  }
+ },
+ {
   "id": "sync-1795439043741",
   "path": "/api/admin/sync",
   "at": "2026-11-23T13:04:03.741Z",
